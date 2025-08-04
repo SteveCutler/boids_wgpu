@@ -1,4 +1,9 @@
 use glfw::{fail_on_errors, Action, Key, Window, WindowHint, ClientApiHint};
+mod renderer_backend;
+use renderer_backend::pipeline_builder::PipelineBuilder;
+
+use crate::renderer_backend::pipeline_builder;
+use wgpu::PipelineCache;
 
 struct State<'a> {
     instance: wgpu::Instance,
@@ -8,6 +13,7 @@ struct State<'a> {
     config: wgpu::SurfaceConfiguration,
     size: (i32, i32),
     window: &'a mut Window,
+    render_pipeline: wgpu::RenderPipeline,
 }
 
 impl<'a> State<'a> {
@@ -44,6 +50,15 @@ impl<'a> State<'a> {
             .request_device(&device_descriptor)
             .await.unwrap();
 
+    //     let pipeline_cache = unsafe{
+    //         device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
+    //             label: Some("Main Pipeline Cache"),
+    //             data: None,       // No precompiled cache data
+    //             fallback: false,  // Set to true if you want fallback behavior on invalid cache
+    //     })
+    // };
+       // let pipeline_cache: None;
+
 
         let surface_capabilities = surface.get_capabilities(&adapter);
         let surface_format = surface_capabilities
@@ -65,6 +80,13 @@ impl<'a> State<'a> {
         };
         surface.configure(&device, &config);
 
+        let mut pipeline_builder = PipelineBuilder::new();
+        pipeline_builder.set_shader_module("shaders/shader.wgsl", "vs_main", "fs_main");
+        pipeline_builder.set_pixel_format(config.format);
+        let render_pipeline = pipeline_builder.build_pipeline(&device);
+
+         
+
         Self {
             instance,
             window,
@@ -73,6 +95,7 @@ impl<'a> State<'a> {
             queue,
             config,
             size,
+            render_pipeline,
         }
     }
 
@@ -122,7 +145,11 @@ impl<'a> State<'a> {
             timestamp_writes: None
         };
 
-        command_encoder.begin_render_pass(&render_pass_descriptor);
+       {
+            let mut renderpass = command_encoder.begin_render_pass(&render_pass_descriptor);
+            renderpass.set_pipeline(&self.render_pipeline);
+            renderpass.draw(0..3, 0..1);
+        }
         self.queue.submit(std::iter::once(command_encoder.finish()));
 
         drawable.present();
