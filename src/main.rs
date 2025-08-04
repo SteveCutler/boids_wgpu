@@ -1,9 +1,6 @@
 use glfw::{fail_on_errors, Action, Key, Window, WindowHint, ClientApiHint};
 mod renderer_backend;
-use renderer_backend::pipeline_builder::PipelineBuilder;
-
-use crate::renderer_backend::{mesh_builder, pipeline_builder};
-use wgpu::PipelineCache;
+use renderer_backend::{pipeline_builder::PipelineBuilder, mesh_builder};
 
 struct State<'a> {
     instance: wgpu::Instance,
@@ -15,6 +12,7 @@ struct State<'a> {
     window: &'a mut Window,
     render_pipeline: wgpu::RenderPipeline,
     triangle_mesh: wgpu::Buffer,
+    quad_mesh: mesh_builder::Mesh
 }
 
 impl<'a> State<'a> {
@@ -38,27 +36,15 @@ impl<'a> State<'a> {
             .await.unwrap();
 
         let device_descriptor = wgpu::DeviceDescriptor {
-            label: Some("Device"),
             required_features: wgpu::Features::empty(),
             required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::default(),  // <-- singular, not plural
+            memory_hints: wgpu::MemoryHints::default(),
+            label: Some("Device"),
             trace: wgpu::Trace::Off,
-                          // <-- Option<PathBuf>
         };
-
-
         let (device, queue) = adapter
             .request_device(&device_descriptor)
             .await.unwrap();
-
-    //     let pipeline_cache = unsafe{
-    //         device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
-    //             label: Some("Main Pipeline Cache"),
-    //             data: None,       // No precompiled cache data
-    //             fallback: false,  // Set to true if you want fallback behavior on invalid cache
-    //     })
-    // };
-       // let pipeline_cache: None;
 
 
         let surface_capabilities = surface.get_capabilities(&adapter);
@@ -81,15 +67,16 @@ impl<'a> State<'a> {
         };
         surface.configure(&device, &config);
 
-        let triangle_mesh = mesh_builder::make_triangle(&device);
+        let triangle_buffer = mesh_builder::make_triangle(&device);
+
+        let quad_mesh = mesh_builder::make_quad(&device);
 
         let mut pipeline_builder = PipelineBuilder::new();
-        pipeline_builder.add_vertex_buffer_layout(mesh_builder::Vertex::get_layout());
         pipeline_builder.set_shader_module("shaders/shader.wgsl", "vs_main", "fs_main");
         pipeline_builder.set_pixel_format(config.format);
+        pipeline_builder.add_vertex_buffer_layout(mesh_builder::Vertex::get_layout());
         let render_pipeline = pipeline_builder.build_pipeline(&device);
-
-         
+        pipeline_builder.reset();
 
         Self {
             instance,
@@ -100,7 +87,8 @@ impl<'a> State<'a> {
             config,
             size,
             render_pipeline,
-            triangle_mesh,
+            triangle_mesh: triangle_buffer,
+            quad_mesh: quad_mesh,
         }
     }
 
@@ -150,11 +138,18 @@ impl<'a> State<'a> {
             timestamp_writes: None
         };
 
-       {
+        {
             let mut renderpass = command_encoder.begin_render_pass(&render_pass_descriptor);
             renderpass.set_pipeline(&self.render_pipeline);
-            renderpass.set_vertex_buffer(0, self.triangle_mesh.slice(..));
-            renderpass.draw(0..3, 0..1);
+
+            renderpass.set_vertex_buffer(0, self.quad_mesh.vertex_buffer.slice(..));
+            renderpass.set_index_buffer(self.quad_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            renderpass.draw_indexed(0..6, 0, 0..1);
+
+            
+
+           renderpass.set_vertex_buffer(0, self.triangle_mesh.slice(..));
+           renderpass.draw(0..3, 0..1);
         }
         self.queue.submit(std::iter::once(command_encoder.finish()));
 
@@ -214,7 +209,6 @@ async fn run() {
             },
             Err(e) => eprintln!("{:?}", e),
         }
-        
     }
 }
 

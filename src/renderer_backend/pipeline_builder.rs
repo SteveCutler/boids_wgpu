@@ -23,6 +23,10 @@ impl PipelineBuilder {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.vertex_buffer_layouts.clear();
+    }
+
     pub fn add_vertex_buffer_layout(&mut self, layout: wgpu::VertexBufferLayout<'static>) {
         self.vertex_buffer_layouts.push(layout);
     }
@@ -41,7 +45,7 @@ impl PipelineBuilder {
 
     pub fn build_pipeline(&self, device: &wgpu::Device) -> wgpu::RenderPipeline {
 
-        let mut filepath = current_dir().unwrap();
+         let mut filepath = current_dir().unwrap();
         filepath.push("src/");
         filepath.push(self.shader_filename.as_str());
         let filepath = filepath.into_os_string().into_string().unwrap();
@@ -66,14 +70,15 @@ impl PipelineBuilder {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
-        let vert_compile_options = wgpu::PipelineCompilationOptions {
-            constants: &[],
-            zero_initialize_workgroup_memory: true,
-        };
-        let frag_compile_options = wgpu::PipelineCompilationOptions {
-            constants: &[],
-            zero_initialize_workgroup_memory: true,
-        };
+            let vert_compile_options = wgpu::PipelineCompilationOptions {
+                constants: &[],
+                zero_initialize_workgroup_memory: true,
+            };
+        
+            let frag_compile_options = wgpu::PipelineCompilationOptions {
+                constants: &[],
+                zero_initialize_workgroup_memory: true,
+            };
         
         
         let render_pipeline_descriptor = wgpu::RenderPipelineDescriptor {
