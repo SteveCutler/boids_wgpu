@@ -1,6 +1,9 @@
 use std::env::current_dir;
 
 use super::bind_group;
+use wgpu::{
+    TexelCopyTextureInfo, TexelCopyBufferInfo, TexelCopyBufferLayout, Origin3d, TextureAspect,
+};
 
 pub struct Material {
     pub bind_group: wgpu::BindGroup,
@@ -36,18 +39,21 @@ impl Material {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             label: Some(label),
             view_formats: &[wgpu::TextureFormat::Rgba8Unorm,]};
+        
         let texture = device.create_texture(&texture_descriptor);
+
+        let texture_info = TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: TextureAspect::All,
+        };
 
         // Upload to it
         queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
+            texture_info,
             &converted,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * size.0),
                 rows_per_image: Some(size.1),

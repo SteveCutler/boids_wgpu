@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 glfw = "*"
-wgpu = "*"
+wgpu = "26.0.1"
 pollster = "*"
 glm = "*"
 image = "*"

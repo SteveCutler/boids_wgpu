@@ -79,10 +79,7 @@ impl <'a> Builder <'a> {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
-            let vert_compile_options = wgpu::PipelineCompilationOptions {
-                constants: &[],
-                zero_initialize_workgroup_memory: true,
-            };
+           
         
             let frag_compile_options = wgpu::PipelineCompilationOptions {
                 constants: &[],
@@ -97,7 +94,7 @@ impl <'a> Builder <'a> {
 
             vertex: wgpu::VertexState {
                 module: &shader_module,
-                compilation_options:vert_compile_options,
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
                 entry_point: Some(&self.vertex_entry),
                 buffers: &self.vertex_buffer_layouts,
             },
@@ -114,7 +111,7 @@ impl <'a> Builder <'a> {
 
             fragment: Some(wgpu::FragmentState {
                 module: &shader_module,
-                compilation_options: frag_compile_options,
+                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 entry_point: Some(&self.fragment_entry),
                 targets: &render_targets,
             }),
