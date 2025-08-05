@@ -1,6 +1,6 @@
 use glfw::{fail_on_errors, Action, Key, Window, WindowHint, ClientApiHint};
 mod renderer_backend;
-use renderer_backend::{bind_group_layout, pipeline, mesh_builder, material::Material, ubo::UBO};
+use renderer_backend::{bind_group_layout, pipeline, mesh_builder, material::Material, ubo::{UBO, UBOGroup}};
 mod model;
 use model::game_object::Object;
 use glm::ext;
@@ -44,7 +44,8 @@ struct State<'a> {
     quad_mesh: mesh_builder::Mesh,
     triangle_material: Material,
     quad_material: Material,
-    ubo: Option<UBO>,
+    ubo: Option<UBOGroup>,
+    projection_ubo: UBO,
 }
 
 impl<'a> State<'a> {
@@ -126,6 +127,7 @@ impl<'a> State<'a> {
             builder.add_vertex_buffer_layout(mesh_builder::Vertex::get_layout());
             builder.add_bind_group_layout(&material_bind_group_layout);
             builder.add_bind_group_layout(&ubo_bind_group_layout);
+            builder.add_bind_group_layout(&ubo_bind_group_layout);
             render_pipeline = builder.build_pipeline("render pipeline");
           //  builder.reset();
 
@@ -134,6 +136,7 @@ impl<'a> State<'a> {
         let triangle_material = Material::new("img/winry.jpg", &device, &queue, "Triangle material", &material_bind_group_layout);
         let quad_material = Material::new("img/satin.jpg", &device, &queue, "Quad material", &material_bind_group_layout);
 
+        let projection_ubo = UBO::new(&device,ubo_bind_group_layout);
 
         Self {
             instance,
@@ -149,6 +152,7 @@ impl<'a> State<'a> {
             triangle_material,
             quad_material,
             ubo: None,
+            projection_ubo,
         }
     }
 
@@ -161,7 +165,7 @@ impl<'a> State<'a> {
             ubo_bind_group_layout = builder.build( "UBO bind group layout")
         }
 
-        self.ubo = Some(UBO::new(&self.device, object_count, ubo_bind_group_layout));
+        self.ubo = Some(UBOGroup::new(&self.device, object_count, ubo_bind_group_layout));
     }
 
     fn resize(&mut self, new_size: (i32, i32)) {
@@ -177,12 +181,17 @@ impl<'a> State<'a> {
         self.surface = self.instance.create_surface(self.window.render_context()).unwrap();
     }
 
-     fn render(&mut self, quads: &Vec<Object>, tris: &Vec<Object>) -> Result<(), wgpu::SurfaceError>{
+    fn update_projection(&mut self){
+        let fov_y: f32 = 90.0;
+        let aspect: f32 = 4.0 / 3.0;
+        let z_near: f32 = 0.1;
+        let z_far: f32 = 10.0;
+        let projection= ext::perspective(fov_y, aspect, z_near, z_far);
+        self.projection_ubo.upload(&projection, &self.queue)
+    }
 
-        self.device.poll(PollType::wait());
-
-        // Upload
-        let mut offset: u64 = 0;
+    fn update_transforms(&mut self, quads: &Vec<Object>, tris: &Vec<Object>){
+         let mut offset: u64 = 0;
         for i in 0..quads.len() {
             let c0 = glm::Vec4::new(1.0, 0.0, 0.0, 0.0);
             let c1 = glm::Vec4::new(0.0, 1.0, 0.0, 0.0);
@@ -209,10 +218,26 @@ impl<'a> State<'a> {
                 * ext::translate(&m1, tris[i].position);
             self.ubo.as_mut().unwrap().upload(offset + i as u64, &matrix, &self.queue);
         }
+    }
+        
+    
+ 
+     fn render(&mut self, quads: &Vec<Object>, tris: &Vec<Object>) -> Result<(), wgpu::SurfaceError>{
+
+        self.device.poll(PollType::wait()).ok();
+
+        // Upload
+        self.update_projection();
+
+        self.update_transforms(quads, tris);
+        
+
+       
 
         let event = self.queue.submit([]);
+       
         let maintain = PollType::WaitForSubmissionIndex(event);
-        self.device.poll(maintain);
+        self.device.poll(maintain).ok();
         
 
         let drawable = self.surface.get_current_texture()?;
@@ -254,6 +279,7 @@ impl<'a> State<'a> {
 
             // Quads
             renderpass.set_bind_group(0, &self.quad_material.bind_group, &[]);
+            renderpass.set_bind_group(2, &self.projection_ubo.bind_group, &[]);
             renderpass.set_vertex_buffer(0, 
                 self.quad_mesh.buffer.slice(0..self.quad_mesh.offset));
             renderpass.set_index_buffer(self.quad_mesh.buffer.slice(self.quad_mesh.offset..), 
@@ -312,11 +338,11 @@ async fn run() {
     // Build world
     let mut world = World::new();
     world.tris.push(Object {
-        position: glm::Vec3::new(0.0, 0.0, 0.0),
+        position: glm::Vec3::new(0.0, 0.0, -1.0),
         angle: 0.0
     });
     world.quads.push(Object {
-        position: glm::Vec3::new(0.5, 0.0, 0.0),
+        position: glm::Vec3::new(0.5, 0.0, -0.5),
         angle: 0.0
     });
     state.build_ubos_for_objects(2);
