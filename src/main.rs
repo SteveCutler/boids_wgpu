@@ -1,25 +1,31 @@
+use std::collections::HashMap;
 use glfw::{fail_on_errors, Action, Key, Window, WindowHint, ClientApiHint};
 mod renderer_backend;
-use renderer_backend::{bind_group_layout, pipeline, mesh_builder, material::Material, ubo::{UBO, UBOGroup}};
+use renderer_backend::{bind_group_layout, material::Material, mesh_builder, pipeline, 
+    ubo::{UBO, UBOGroup}};
 mod model;
-use model::game_object::Object;
-use glm::ext;
-use wgpu::{PollType, Device, Queue};
-//use wgpu::{ImageCopyTextureBase, ImageDataLayoutBase, TextureAspect};
-use pollster;
+use model::game_objects::{Camera, Object};
+use glm::{ext, dot, radians};
+use wgpu::wgt::PollType;
 
-struct World{
+struct World {
     quads: Vec<Object>,
-    tris:Vec<Object>,
-
+    tris: Vec<Object>,
+    camera: Camera,
+    keys: HashMap<glfw::Key, bool>,
 }
 
-impl World{
-    fn new() -> Self{
-        World { quads: Vec::new(), tris: Vec::new()}
+impl World {
+
+    fn new() -> Self {
+        World { 
+            quads: Vec::new(), 
+            tris: Vec::new(), 
+            camera: Camera::new(),
+            keys: HashMap::new() }
     }
 
-    fn update(&mut self, dt: f32){
+    fn update(&mut self, dt: f32, window: &mut Window) {
 
         for i in 0..self.tris.len() {
             self.tris[i].angle = self.tris[i].angle + 0.001 * dt;
@@ -27,9 +33,31 @@ impl World{
                 self.tris[i].angle -= 360.0;
             }
         }
+
+        let mouse_pos = window.get_cursor_pos();
+        window.set_cursor_pos(400.0, 300.0);
+        let dx = (-40.0 * (mouse_pos.0 - 400.0) / 400.0) as f32;
+        let dy = (-40.0 * (mouse_pos.1 - 300.0) / 300.0) as f32;
+        self.camera.spin(dx, dy);
+
+        let mut d_right: f32 = 0.0;
+        let mut d_forwards: f32 = 0.0;
+
+        if self.keys[&glfw::Key::W] {
+            d_forwards = d_forwards + 1.0;
+        }
+        if self.keys[&glfw::Key::A] {
+            d_right = d_right - 1.0;
+        }
+        if self.keys[&glfw::Key::S] {
+            d_forwards = d_forwards - 1.0;
+        }
+        if self.keys[&glfw::Key::D] {
+            d_right = d_right + 1.0;
+        }
+        self.camera.walk(d_right, d_forwards);
     }
 }
-
 
 struct State<'a> {
     instance: wgpu::Instance,
@@ -51,7 +79,6 @@ struct State<'a> {
 impl<'a> State<'a> {
 
     async fn new(window: &'a mut Window) -> Self {
-
 
         let size = window.get_framebuffer_size();
 
@@ -105,18 +132,18 @@ impl<'a> State<'a> {
 
         let quad_mesh = mesh_builder::make_quad(&device);
 
-        let material_bind_group_layout: wgpu::BindGroupLayout;
+        let material_bind_group_layout;
         {
             let mut builder = bind_group_layout::Builder::new(&device);
             builder.add_material();
-            material_bind_group_layout = builder.build( "Material bind group layout")
+            material_bind_group_layout = builder.build("Material Bind Group Layout");
         }
-        
-        let ubo_bind_group_layout: wgpu::BindGroupLayout;
+
+        let ubo_bind_group_layout;
         {
             let mut builder = bind_group_layout::Builder::new(&device);
             builder.add_ubo();
-            ubo_bind_group_layout = builder.build( "UBO bind group layout")
+            ubo_bind_group_layout = builder.build("UBO Bind Group Layout");
         }
 
         let render_pipeline: wgpu::RenderPipeline;
@@ -128,15 +155,13 @@ impl<'a> State<'a> {
             builder.add_bind_group_layout(&material_bind_group_layout);
             builder.add_bind_group_layout(&ubo_bind_group_layout);
             builder.add_bind_group_layout(&ubo_bind_group_layout);
-            render_pipeline = builder.build_pipeline("render pipeline");
-          //  builder.reset();
-
+            render_pipeline = builder.build("Render Pipeline");
         }
 
-        let triangle_material = Material::new("img/winry.jpg", &device, &queue, "Triangle material", &material_bind_group_layout);
-        let quad_material = Material::new("img/satin.jpg", &device, &queue, "Quad material", &material_bind_group_layout);
+        let triangle_material = Material::new("img/winry.jpg", &device, &queue, "Triangle Material", &material_bind_group_layout);
+        let quad_material = Material::new("img/satin.jpg", &device, &queue, "Quad Material", &material_bind_group_layout);
 
-        let projection_ubo = UBO::new(&device,ubo_bind_group_layout);
+        let projection_ubo = UBO::new(&device, ubo_bind_group_layout);
 
         Self {
             instance,
@@ -148,24 +173,12 @@ impl<'a> State<'a> {
             size,
             render_pipeline,
             triangle_mesh: triangle_buffer,
-            quad_mesh: quad_mesh,
-            triangle_material,
-            quad_material,
+            quad_mesh,
+            triangle_material: triangle_material,
+            quad_material: quad_material,
             ubo: None,
-            projection_ubo,
+            projection_ubo: projection_ubo
         }
-    }
-
-    pub fn build_ubos_for_objects(&mut self, object_count: usize){
-
-        let ubo_bind_group_layout;
-         {
-            let mut builder = bind_group_layout::Builder::new(&self.device);
-            builder.add_ubo();
-            ubo_bind_group_layout = builder.build( "UBO bind group layout")
-        }
-
-        self.ubo = Some(UBOGroup::new(&self.device, object_count, ubo_bind_group_layout));
     }
 
     fn resize(&mut self, new_size: (i32, i32)) {
@@ -181,17 +194,40 @@ impl<'a> State<'a> {
         self.surface = self.instance.create_surface(self.window.render_context()).unwrap();
     }
 
-    fn update_projection(&mut self){
-        let fov_y: f32 = 90.0;
-        let aspect: f32 = 4.0 / 3.0;
-        let z_near: f32 = 0.1;
-        let z_far: f32 = 10.0;
-        let projection= ext::perspective(fov_y, aspect, z_near, z_far);
-        self.projection_ubo.upload(&projection, &self.queue)
+    pub fn build_ubos_for_objects(&mut self, object_count: usize) {
+
+        let ubo_bind_group_layout;
+        {
+            let mut builder = bind_group_layout::Builder::new(&self.device);
+            builder.add_ubo();
+            ubo_bind_group_layout = builder.build("UBO Bind Group Layout");
+        }
+        self.ubo = Some(UBOGroup::new(&self.device, object_count, ubo_bind_group_layout));
     }
 
-    fn update_transforms(&mut self, quads: &Vec<Object>, tris: &Vec<Object>){
-         let mut offset: u64 = 0;
+    fn update_projection(&mut self, camera: &Camera) {
+
+        let c0 = glm::Vec4::new(camera.right.x, camera.up.x, -camera.forwards.x, 0.0);
+        let c1 = glm::Vec4::new(camera.right.y, camera.up.y, -camera.forwards.y, 0.0);
+        let c2 = glm::Vec4::new(camera.right.z, camera.up.z, -camera.forwards.z, 0.0);
+        let a: f32 = -dot(camera.right, camera.position);
+        let b: f32 = -dot(camera.up, camera.position);
+        let c: f32 = dot(camera.forwards, camera.position);
+        let c3 = glm::Vec4::new(a, b, c, 1.0);
+        let view = glm::Matrix4::new(c0, c1, c2, c3);
+
+        let fov_y: f32 = radians(45.0);
+        let aspect = 4.0 / 3.0;
+        let z_near = 0.1;
+        let z_far = 10.0;
+        let projection = ext::perspective(fov_y, aspect, z_near, z_far);
+        
+        let view_proj = projection * view;
+        self.projection_ubo.upload(&view_proj, &self.queue);
+    }
+
+    fn update_transforms(&mut self, quads: &Vec<Object>, tris: &Vec<Object>) {
+        let mut offset: u64 = 0;
         for i in 0..quads.len() {
             let c0 = glm::Vec4::new(1.0, 0.0, 0.0, 0.0);
             let c1 = glm::Vec4::new(0.0, 1.0, 0.0, 0.0);
@@ -219,27 +255,20 @@ impl<'a> State<'a> {
             self.ubo.as_mut().unwrap().upload(offset + i as u64, &matrix, &self.queue);
         }
     }
-        
-    
- 
-     fn render(&mut self, quads: &Vec<Object>, tris: &Vec<Object>) -> Result<(), wgpu::SurfaceError>{
 
-        self.device.poll(PollType::wait()).ok();
+    fn render(&mut self, quads: &Vec<Object>, 
+        tris: &Vec<Object>,
+        camera: &Camera) -> Result<(), wgpu::SurfaceError>{
+        let event = self.queue.submit([]);
+
+        self.device.poll(PollType::WaitForSubmissionIndex(event)).ok();
 
         // Upload
-        self.update_projection();
-
+        self.update_projection(camera);
         self.update_transforms(quads, tris);
-        
-
-       
 
         let event = self.queue.submit([]);
-       
-        let maintain = PollType::WaitForSubmissionIndex(event);
-        self.device.poll(maintain).ok();
-        
-
+        self.device.poll(PollType::WaitForSubmissionIndex(event)).ok();
         let drawable = self.surface.get_current_texture()?;
         let image_view_descriptor = wgpu::TextureViewDescriptor::default();
         let image_view = drawable.texture.create_view(&image_view_descriptor);
@@ -252,7 +281,6 @@ impl<'a> State<'a> {
         let color_attachment = wgpu::RenderPassColorAttachment {
             view: &image_view,
             resolve_target: None,
-            depth_slice: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(wgpu::Color {
                     r: 0.75,
@@ -262,10 +290,10 @@ impl<'a> State<'a> {
                 }),
                 store: wgpu::StoreOp::Store,
             },
+            depth_slice: None,
         };
 
-
-         let render_pass_descriptor = wgpu::RenderPassDescriptor {
+        let render_pass_descriptor = wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(color_attachment)],
             depth_stencil_attachment: None,
@@ -306,11 +334,8 @@ impl<'a> State<'a> {
             }
         }
         self.queue.submit(std::iter::once(command_encoder.finish()));
-
-        let event = self.queue.submit([]);
-        let maintain = PollType::WaitForSubmissionIndex(event);
-        self.device.poll(maintain);
-        //self.device.poll(PollType::Wait());
+         let event = self.queue.submit([]);
+        self.device.poll(PollType::WaitForSubmissionIndex(event)).ok();
 
         drawable.present();
 
@@ -334,6 +359,7 @@ async fn run() {
     state.window.set_key_polling(true);
     state.window.set_mouse_button_polling(true);
     state.window.set_pos_polling(true);
+    state.window.set_cursor_mode(glfw::CursorMode::Hidden);
 
     // Build world
     let mut world = World::new();
@@ -342,15 +368,19 @@ async fn run() {
         angle: 0.0
     });
     world.quads.push(Object {
-        position: glm::Vec3::new(0.5, 0.0, -0.5),
+        position: glm::Vec3::new(0.5, 0.0, -1.5),
         angle: 0.0
     });
     state.build_ubos_for_objects(2);
+    world.keys.insert(glfw::Key::W, false);
+    world.keys.insert(glfw::Key::A, false);
+    world.keys.insert(glfw::Key::S, false);
+    world.keys.insert(glfw::Key::D, false);
 
     while !state.window.should_close() {
         glfw.poll_events();
 
-        world.update(16.67);
+        world.update(16.67, state.window);
 
         for (_, event) in glfw::flush_messages(&events) {
             match event {
@@ -358,6 +388,33 @@ async fn run() {
                 //Hit escape
                 glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
                     state.window.set_should_close(true)
+                }
+
+                glfw::WindowEvent::Key(Key::W, _, Action::Press, _) => {
+                    world.keys.insert(glfw::Key::W, true);
+                }
+                glfw::WindowEvent::Key(Key::W, _, Action::Release, _) => {
+                    world.keys.insert(glfw::Key::W, false);
+                }
+                glfw::WindowEvent::Key(Key::A, _, Action::Press, _) => {
+                    world.keys.insert(glfw::Key::A, true);
+                }
+                glfw::WindowEvent::Key(Key::A, _, Action::Release, _) => {
+                    world.keys.insert(glfw::Key::A, false);
+                }
+
+                glfw::WindowEvent::Key(Key::S, _, Action::Press, _) => {
+                    world.keys.insert(glfw::Key::S, true);
+                }
+                glfw::WindowEvent::Key(Key::S, _, Action::Release, _) => {
+                    world.keys.insert(glfw::Key::S, false);
+                }
+
+                glfw::WindowEvent::Key(Key::D, _, Action::Press, _) => {
+                    world.keys.insert(glfw::Key::D, true);
+                }
+                glfw::WindowEvent::Key(Key::D, _, Action::Release, _) => {
+                    world.keys.insert(glfw::Key::D, false);
                 }
 
                 //Window was moved
@@ -375,7 +432,7 @@ async fn run() {
             }
         }
 
-        match state.render(&world.quads, &world.tris) {
+        match state.render(&world.quads, &world.tris, &world.camera) {
             Ok(_) => {},
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 state.update_surface();

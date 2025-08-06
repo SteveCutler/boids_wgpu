@@ -1,7 +1,5 @@
 use std::env::current_dir;
-use wgpu::PipelineCompilationOptions;
 use std::fs;
-
 
 pub struct Builder<'a> {
     shader_filename: String,
@@ -13,10 +11,10 @@ pub struct Builder<'a> {
     device: &'a wgpu::Device,
 }
 
-impl <'a> Builder <'a> {
+impl<'a> Builder<'a> {
     
     pub fn new(device: &'a wgpu::Device) -> Self {
-        Builder { 
+        Builder {
             shader_filename: "dummy".to_string(),
             vertex_entry: "dummy".to_string(),
             fragment_entry: "dummy".to_string(),
@@ -27,7 +25,7 @@ impl <'a> Builder <'a> {
         }
     }
 
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.vertex_buffer_layouts.clear();
         self.bind_group_layouts.clear();
     }
@@ -35,7 +33,7 @@ impl <'a> Builder <'a> {
     pub fn add_vertex_buffer_layout(&mut self, layout: wgpu::VertexBufferLayout<'static>) {
         self.vertex_buffer_layouts.push(layout);
     }
-    
+
     pub fn add_bind_group_layout(&mut self, layout: &'a wgpu::BindGroupLayout) {
         self.bind_group_layouts.push(layout);
     }
@@ -52,9 +50,9 @@ impl <'a> Builder <'a> {
         self.pixel_format = pixel_format;
     }
 
-    pub fn build_pipeline(&mut self, label: &str) -> wgpu::RenderPipeline {
+    pub fn build(&mut self, label: &str) -> wgpu::RenderPipeline {
 
-         let mut filepath = current_dir().unwrap();
+        let mut filepath = current_dir().unwrap();
         filepath.push("src/");
         filepath.push(self.shader_filename.as_str());
         let filepath = filepath.into_os_string().into_string().unwrap();
@@ -67,11 +65,11 @@ impl <'a> Builder <'a> {
         let shader_module = self.device.create_shader_module(shader_module_descriptor);
 
         let pipeline_layout_descriptor = wgpu::PipelineLayoutDescriptor {
-            label: Some(label),
+            label: Some("Render Pipeline Layout"),
             bind_group_layouts: &self.bind_group_layouts,
             push_constant_ranges: &[],
         };
-        let pipeline_layout = self.device.create_pipeline_layout(&pipeline_layout_descriptor);
+        let pipeline_layout: wgpu::PipelineLayout = self.device.create_pipeline_layout(&pipeline_layout_descriptor);
 
         let render_targets = [Some(wgpu::ColorTargetState {
             format: self.pixel_format,
@@ -79,24 +77,17 @@ impl <'a> Builder <'a> {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
-           
-        
-            let frag_compile_options = wgpu::PipelineCompilationOptions {
-                constants: &[],
-                zero_initialize_workgroup_memory: true,
-            };
-        
-        
         let render_pipeline_descriptor = wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(&pipeline_layout),
-            
+
+            cache: None,
 
             vertex: wgpu::VertexState {
                 module: &shader_module,
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
                 entry_point: Some(&self.vertex_entry),
                 buffers: &self.vertex_buffer_layouts,
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
 
             primitive: wgpu::PrimitiveState {
@@ -111,9 +102,9 @@ impl <'a> Builder <'a> {
 
             fragment: Some(wgpu::FragmentState {
                 module: &shader_module,
-                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 entry_point: Some(&self.fragment_entry),
                 targets: &render_targets,
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
 
             depth_stencil: None,
@@ -122,14 +113,13 @@ impl <'a> Builder <'a> {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
-            cache: None,
+            multiview: None
         };
 
-        let render_pipeline = self.device.create_render_pipeline(&render_pipeline_descriptor);
+        let pipeline = self.device.create_render_pipeline(&render_pipeline_descriptor);
 
         self.reset();
 
-        render_pipeline
+        pipeline
     }
 }
